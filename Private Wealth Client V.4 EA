@@ -1,0 +1,122 @@
+// Private Wealth Client V.4 EA
+// Author: Antonio Mabuya
+// Contact: malefanemaphathe869@gmail.com | +26658818255
+
+// Inputs
+input double TakeProfit = 50;    // Take Profit in pips
+input double StopLoss = 20;      // Stop Loss in pips
+input double RiskPercentage = 1; // Risk Percentage per Trade
+input int Slippage = 3;          // Maximum slippage in pips
+input int MaxTrades = 5;         // Maximum number of trades per pair
+
+// Declare Variables
+double accountRiskAmount;
+double lotSize;
+int rsiPeriod = 14;        // RSI Period
+int emaFastPeriod = 9;     // Fast EMA Period
+int emaSlowPeriod = 21;    // Slow EMA Period
+double rsiValue, fastEMA, slowEMA;
+
+// Function to Calculate Risk per Trade
+double CalculateRiskPerTrade(double riskPercentage) {
+    double riskAmount = AccountBalance() * (riskPercentage / 100);
+    return riskAmount;
+}
+
+// Function to Determine Uptrend (Using RSI and EMA)
+bool IsUptrend() {
+    rsiValue = iRSI(Symbol(), 0, rsiPeriod, PRICE_CLOSE, 0);
+    fastEMA = iMA(Symbol(), 0, emaFastPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+    slowEMA = iMA(Symbol(), 0, emaSlowPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+    
+    // Uptrend condition: RSI > 50 and Fast EMA > Slow EMA
+    return (rsiValue > 50 && fastEMA > slowEMA);
+}
+
+// Function to Determine Downtrend (Using RSI and EMA)
+bool IsDowntrend() {
+    rsiValue = iRSI(Symbol(), 0, rsiPeriod, PRICE_CLOSE, 0);
+    fastEMA = iMA(Symbol(), 0, emaFastPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+    slowEMA = iMA(Symbol(), 0, emaSlowPeriod, 0, MODE_EMA, PRICE_CLOSE, 0);
+    
+    // Downtrend condition: RSI < 50 and Fast EMA < Slow EMA
+    return (rsiValue < 50 && fastEMA < slowEMA);
+}
+
+// Function to Open a Trade with Calculated Lot Size
+void OpenTrade(int direction) {
+    // Calculate lot size based on the risk percentage
+    lotSize = NormalizeDouble(CalculateRiskPerTrade(RiskPercentage) / (StopLoss * MarketInfo(Symbol(), MODE_POINT)), 2);
+    
+    // Calculate Stop Loss and Take Profit prices
+    double stopLossPrice, takeProfitPrice;
+    if (direction == OP_BUY) {
+        stopLossPrice = Ask - StopLoss * MarketInfo(Symbol(), MODE_POINT);
+        takeProfitPrice = Ask + TakeProfit * MarketInfo(Symbol(), MODE_POINT);
+    } else {
+        stopLossPrice = Bid + StopLoss * MarketInfo(Symbol(), MODE_POINT);
+        takeProfitPrice = Bid - TakeProfit * MarketInfo(Symbol(), MODE_POINT);
+    }
+
+    // Open the trade
+    int ticket = OrderSend(Symbol(), direction, lotSize, direction == OP_BUY ? Ask : Bid, Slippage, stopLossPrice, takeProfitPrice, "PRIVATE WEALTH Client V.4 EA", 0, 0, Blue);
+    
+    if(ticket < 0) {
+        Print("Error opening trade: ", GetLastError());
+    } else {
+        Print("Trade opened successfully: ", direction == OP_BUY ? "BUY" : "SELL");
+    }
+}
+
+// Function to Ensure Maximum Trades Limit
+int GetOpenTradesCount() {
+    int openTrades = 0;
+    for(int i = OrdersTotal() - 1; i >= 0; i--) {
+        if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if(OrderSymbol() == Symbol()) {
+                openTrades++;
+            }
+        }
+    }
+    return openTrades;
+}
+
+// Function for Trailing Stop Logic (Optional)
+void ApplyTrailingStop() {
+    for(int i = OrdersTotal() - 1; i >= 0; i--) {
+        if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            // Apply trailing stop to profitable trades
+            if(OrderType() == OP_BUY && OrderOpenPrice() < Ask - StopLoss * MarketInfo(Symbol(), MODE_POINT)) {
+                double newStopLoss = Ask - StopLoss * MarketInfo(Symbol(), MODE_POINT);
+                if(OrderStopLoss() < newStopLoss) {
+                    OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, Blue);
+                    Print("Trailing stop applied for BUY trade");
+                }
+            }
+            if(OrderType() == OP_SELL && OrderOpenPrice() > Bid + StopLoss * MarketInfo(Symbol(), MODE_POINT)) {
+                double newStopLoss = Bid + StopLoss * MarketInfo(Symbol(), MODE_POINT);
+                if(OrderStopLoss() > newStopLoss) {
+                    OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, Blue);
+                    Print("Trailing stop applied for SELL trade");
+                }
+            }
+        }
+    }
+}
+
+// Main Function - On Tick Loop
+void OnTick() {
+    int openTrades = GetOpenTradesCount();
+    
+    // Ensure no more than MaxTrades are opened
+    if(openTrades < MaxTrades) {
+        // Check for trend conditions and open trades accordingly
+        if(IsUptrend()) {
+            OpenTrade(OP_BUY);
+        }
+        if(IsDowntrend()) {
+            OpenTrade(OP_SELL);
+        }
+    }
+    ApplyTrailingStop();  // Optional: apply trailing stop to open trades
+}
